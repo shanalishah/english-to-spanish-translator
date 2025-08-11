@@ -1,18 +1,20 @@
 # Python
 __pycache__/
 *.pyc
-.venv/
-venv/
+*.pyo
+*.pyd
+*.egg-info/
 .env
 
-# Mac/OS
+# Jupyter
+.ipynb_checkpoints/
+
+# OS cruft
 .DS_Store
+Thumbs.db
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Large files (don’t commit)
+# Models / big artifacts (kept in Releases instead)
 *.h5
 *.keras
-*.weights
 *.ckpt
+*.pth
