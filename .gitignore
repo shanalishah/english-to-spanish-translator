@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Model artifacts
+*.h5
+*.keras
+*.weights
+*.pt
+*.bin
+
+# Notebooks & data dumps
+*.ipynb
+data/*.csv
+data/*.txt
+
+# Local secrets
+.streamlit/secrets.toml
+.env
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
