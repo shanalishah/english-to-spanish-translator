@@ -1,4 +1,6 @@
-streamlit>=1.36
+streamlit
 tensorflow==2.18.0
 keras==3.5.0
+numpy
+packaging
 requests
