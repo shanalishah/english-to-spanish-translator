@@ -1,5 +1,0 @@
-# SHA256 checksums for model and vectorizer artifacts in GitHub Releases
-
-9260d7d760f115793408b0694afb36daa6646169cd840ee41352f9327d62b906  source_vectorizer.keras
-47b0dc1848f2ca6963f5def3bfa705b0a39d4ee08aac6d0b4b755e61cd010d97  target_vectorizer.keras
-9f0c1eea7407c3274c371850c3e72df87b3b51194f99d82e409779bcc2a25382  translation_transformer.weights.h5
