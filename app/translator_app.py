@@ -176,4 +176,31 @@ def translate(text: str, src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_to
         # Stop conditions
         if end_tok and next_tok == end_tok:
             break
-        if next_tok == ""
+        if next_tok == "" or next_tok == start_tok:
+            break
+        if next_tok == last_tok:
+            # tiny escape hatch to avoid loops
+            break
+
+        tokens.append(next_tok)
+        last_tok = next_tok
+
+    # Clean: remove special tokens + join
+    out_tokens = [t for t in tokens if t and t not in {start_tok, end_tok, "[UNK]"}]
+    out = " ".join(out_tokens).strip()
+    out = re.sub(r"\s+", " ", out)
+    return out
+
+# -----------------------------
+# UI
+# -----------------------------
+with st.form("translate_form"):
+    text = st.text_input("Your English sentence:", placeholder="e.g., Hello, how are you?")
+    submitted = st.form_submit_button("Translate")
+
+if submitted and text:
+    with st.spinner("Loading model & translating..."):
+        src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok = load_resources()
+        raw = translate(text, src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok)
+        pretty = _postprocess_spanish(raw, text)
+    st.success(f"Spanish: {pretty}")
