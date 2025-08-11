@@ -1,6 +1,6 @@
-streamlit
+streamlit>=1.36
 tensorflow==2.18.0
 keras==3.5.0
-numpy
+numpy==1.26.4
 packaging
 requests
