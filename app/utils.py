@@ -1,11 +1,10 @@
-# app/utils.py
-import os
 from pathlib import Path
 import gdown
 import streamlit as st
 
 @st.cache_resource(show_spinner=False)
 def ensure_file(file_id: str, dest: Path) -> Path:
+    """Download a file from Google Drive (by file ID) to `dest` if missing."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         return dest
