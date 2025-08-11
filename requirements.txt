@@ -1,5 +1,4 @@
 streamlit>=1.36
 tensorflow==2.18.0
-keras>=3.6.0,<3.7
-numpy>=1.26
-requests>=2.31
+keras==3.5.0
+requests
