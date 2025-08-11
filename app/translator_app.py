@@ -13,7 +13,7 @@ import tensorflow as tf
 from keras.models import load_model
 from keras.saving import register_keras_serializable
 
-# Local transformer definition
+# Local transformer definition (same file you already have)
 from transformer import Transformer
 
 # -----------------------------
@@ -24,13 +24,13 @@ st.title("English → Spanish Translator 🌍")
 st.caption("Enter English text and get a Spanish translation. Uses a custom Transformer trained in TensorFlow/Keras.")
 
 # -----------------------------
-# Release assets (your GitHub URLs)
+# GitHub Release assets (your links)
 # -----------------------------
 SOURCE_VEC_URL = "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/source_vectorizer.keras"
 TARGET_VEC_URL = "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/target_vectorizer.keras"
 WEIGHTS_URL    = "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/translation_transformer.weights.h5"
 
-# SHA256 checks (optional but recommended)
+# Optional integrity checks (the hashes you provided)
 SHA256_EXPECTED = {
     "source_vectorizer.keras": "9260d7d760f115793408b0694afb36daa6646169cd840ee41352f9327d62b906",
     "target_vectorizer.keras": "47b0dc1848f2ca6963f5def3bfa705b0a39d4ee08aac6d0b4b755e61cd010d97",
@@ -38,7 +38,7 @@ SHA256_EXPECTED = {
 }
 
 # -----------------------------
-# Model hyperparams (must match training)
+# Training-time hyperparams (must match)
 # -----------------------------
 VOCAB_SIZE   = 15000
 SEQ_LENGTH   = 20
@@ -49,11 +49,10 @@ D_FF         = 512
 DROPOUT_RATE = 0.1
 
 # -----------------------------
-# Keras custom objects (for saved vectorizers)
+# Keras custom objects (vectorizers depend on this)
 # -----------------------------
 @register_keras_serializable()
 def custom_standardization(input_string):
-    # Matches your training-time cleaning (punctuation stripped for the vectorizer)
     strip_chars = string.punctuation + "¿"
     strip_chars = strip_chars.replace("[", "").replace("]", "")
     return tf.strings.regex_replace(tf.strings.lower(input_string), f"[{re.escape(strip_chars)}]", "")
@@ -68,13 +67,12 @@ def _sha256_file(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-def download_file(url: str, dest: str):
-    """Download url to dest if not present. Verify optional SHA256 if provided."""
+def _download(url: str, dest: str):
     if not os.path.exists(dest):
         r = requests.get(url, stream=True, timeout=60)
         r.raise_for_status()
         with open(dest, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 256):
+            for chunk in r.iter_content(256 * 1024):
                 if chunk:
                     f.write(chunk)
     expected = SHA256_EXPECTED.get(os.path.basename(dest), "")
@@ -83,15 +81,24 @@ def download_file(url: str, dest: str):
         if got.lower() != expected.lower():
             raise ValueError(f"SHA256 mismatch for {dest}\nExpected: {expected}\nGot:      {got}")
 
-def detect_special_tokens(vocab):
-    """Return (start_token, end_token) if present in vocabulary."""
-    candidates = [("[start]", "[end]"), ("<start>", "<end>"), ("[CLS]", "[SEP]")]
-    for s, e in candidates:
-        if s in vocab and e in vocab:
-            return s, e
-    return None, None
+def _postprocess(src_text: str, es_text: str) -> str:
+    """Light cleanup: spacing, capitalization, Spanish question marks."""
+    out = re.sub(r"\s+", " ", es_text).strip()
+    if out:
+        # Capitalize first letter
+        if out[0].isalpha():
+            out = out[0].upper() + out[1:]
+    # Add ¿ ? if input was a question
+    if src_text.strip().endswith("?"):
+        out = out.rstrip(".! ")
+        if not out.endswith("?"):
+            out += "?"
+        if not out.startswith("¿"):
+            # Spanish style: open with inverted mark; typically lowercase after it
+            out = "¿" + out[0].lower() + out[1:]
+    return out
 
-def build_transformer():
+def _build_model():
     return Transformer(
         n_layers=N_LAYERS,
         d_emb=D_EMB,
@@ -102,116 +109,64 @@ def build_transformer():
         tgt_vocab_size=VOCAB_SIZE,
     )
 
-def postprocess_text(src_text: str, es_text: str) -> str:
-    """Light cleanup: add Spanish question marks if the source is a question, fix casing, spaces."""
-    out = re.sub(r"\s+", " ", es_text).strip()
-
-    # Basic capitalization (capitalize first letter if sentence-like)
-    if out and out[0].isalpha():
-        out = out[0].upper() + out[1:]
-
-    # If English input ends with '?', ensure Spanish uses ¿ ... ?
-    if src_text.strip().endswith("?"):
-        out = out.rstrip(".! ")
-        if not out.endswith("?"):
-            out = f"{out}?"
-        # Add opening inverted question mark if missing
-        if not out.startswith("¿"):
-            out = "¿" + out[0].lower() + out[1:]  # Spanish often uses lowercase after ¿
-
-    return out
-
 # -----------------------------
-# Cached resource loader
+# Cached resources
 # -----------------------------
 @st.cache_resource(show_spinner=False)
 def load_resources():
-    # 1) Ensure artifacts are present (download from GitHub Releases)
-    download_file(SOURCE_VEC_URL, "source_vectorizer.keras")
-    download_file(TARGET_VEC_URL, "target_vectorizer.keras")
-    download_file(WEIGHTS_URL, "translation_transformer.weights.h5")
+    # Download artifacts
+    _download(SOURCE_VEC_URL, "source_vectorizer.keras")
+    _download(TARGET_VEC_URL, "target_vectorizer.keras")
+    _download(WEIGHTS_URL, "translation_transformer.weights.h5")
 
-    # 2) Load vectorizers with custom standardization
-    src_vec = load_model("source_vectorizer.keras", custom_objects={"custom_standardization": custom_standardization})
-    tgt_vec = load_model("target_vectorizer.keras", custom_objects={"custom_standardization": custom_standardization})
+    # Load vectorizers (exactly like your working version)
+    src_vec = load_model("source_vectorizer.keras")
+    tgt_vec = load_model("target_vectorizer.keras")
 
-    # 3) Build and load model
-    model = build_transformer()
+    # Build + load model
+    model = _build_model()
 
-    # Trigger model build using vectorizer outputs
-    seed_src = src_vec(["hello"])
-    seed_tgt = tgt_vec(["[start] hello [end]"])[:, :-1]
-    _ = model((seed_src, seed_tgt))
+    # Trigger build with real shapes (same seed pattern you used)
+    src_seed = src_vec(["hello"])
+    tgt_seed = tgt_vec(["[start] hello [end]"])[:, :-1]
+    _ = model((src_seed, tgt_seed))
     model.load_weights("translation_transformer.weights.h5")
 
-    # 4) Vocab maps & special tokens
+    # Vocab & maps
     vocab = tgt_vec.get_vocabulary()
     id_to_tok = dict(enumerate(vocab))
-    tok_to_id = {t: i for i, t in enumerate(vocab)}
-    start_tok, end_tok = detect_special_tokens(vocab)
 
-    return src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok
+    # We’ll just use the literal tokens used in training
+    start_tok = "[start]"
+    end_tok   = "[end]"
+
+    return src_vec, tgt_vec, model, id_to_tok, start_tok, end_tok
 
 # -----------------------------
-# Greedy decode with “non-special” top-k fallback
+# Greedy decode — exactly your working loop
 # -----------------------------
-def translate(text: str, src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok, max_len=SEQ_LENGTH):
+def translate(text: str, src_vec, tgt_vec, model, id_to_tok, start_tok, end_tok, max_len=SEQ_LENGTH):
     if not text.strip():
         return ""
 
-    # Fallbacks if tokens weren't detected (should not happen with your files)
-    vocab = list(id_to_tok.values())
-    if start_tok is None:
-        start_tok = "[start]" if "[start]" in vocab else ""
-    if end_tok is None:
-        end_tok = "[end]" if "[end]" in vocab else None
+    tokenized_input_sentence = src_vec([text])
+    decoded_sentence = start_tok  # seed EXACTLY like before
 
-    # Vectorize source
-    src = src_vec([text])
+    for i in range(max_len):
+        tokenized_target_sentence = tgt_vec([decoded_sentence])[:, :-1]
+        predictions = model((tokenized_input_sentence, tokenized_target_sentence))
+        # Select the i-th position (your original indexing)
+        sampled_token_index = int(np.argmax(predictions[0, i, :]))
+        sampled_token = id_to_tok.get(sampled_token_index, "")
 
-    # Seed with start token if available
-    tokens = [start_tok] if start_tok else []
-    last_tok = None
-
-    for step in range(max_len):
-        seed = " ".join(tokens) if tokens else ""
-        tgt = tgt_vec([seed])[:, :-1]
-
-        # If tgt length is zero (no start token), make a minimal one to get valid shape
-        if tgt.shape[1] == 0:
-            tmp_seed = start_tok if start_tok else ""
-            tgt = tgt_vec([tmp_seed])[:, :-1]
-
-        logits = model((src, tgt)).numpy()  # (1, tgt_len, vocab)
-        step_logits = logits[0, -1, :]      # last time-step
-
-        # Choose best non-special candidate (skip "", [UNK], start, immediate end on first step, repeat)
-        cand_ids = step_logits.argsort()[-10:][::-1]
-        next_tok = None
-        for cid in cand_ids:
-            tok = id_to_tok.get(int(cid), "")
-            if tok in {"", "[UNK]"}:
-                continue
-            if start_tok and tok == start_tok:
-                continue
-            if end_tok and tok == end_tok and step == 0:
-                continue
-            if tok == last_tok:
-                continue
-            next_tok = tok
+        decoded_sentence += " " + sampled_token
+        if sampled_token == end_tok:
             break
 
-        if not next_tok:
-            break
-        if end_tok and next_tok == end_tok:
-            break
-
-        tokens.append(next_tok)
-        last_tok = next_tok
-
-    # Strip specials & tidy
-    out_tokens = [t for t in tokens if t and t not in {start_tok, end_tok, "[UNK]"}]
-    return " ".join(out_tokens).strip()
+    # Clean: remove tokens and extra spaces
+    out = decoded_sentence.replace(start_tok, "").replace(end_tok, "").strip()
+    out = re.sub(r"\s+", " ", out)
+    return out
 
 # -----------------------------
 # UI
@@ -223,9 +178,9 @@ with st.form("translate_form"):
 if submitted and text:
     try:
         with st.spinner("Loading model & translating..."):
-            src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok = load_resources()
-            raw = translate(text, src_vec, tgt_vec, model, id_to_tok, tok_to_id, start_tok, end_tok)
-            result = postprocess_text(text, raw)
+            src_vec, tgt_vec, model, id_to_tok, start_tok, end_tok = load_resources()
+            raw = translate(text, src_vec, tgt_vec, model, id_to_tok, start_tok, end_tok)
+            result = _postprocess(text, raw)
         st.success(f"Spanish: {result}")
     except Exception as e:
         st.error(f"Translation failed: {e}")
