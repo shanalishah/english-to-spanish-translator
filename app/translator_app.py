@@ -1,120 +1,102 @@
-# app.py
-# pip install -U streamlit gdown tensorflow keras numpy packaging
-
 import os
-import re
-import string
+import hashlib
+import requests
+from pathlib import Path
+
+import streamlit as st
 import numpy as np
 import tensorflow as tf
-import streamlit as st
-import gdown
 from keras.models import load_model
-from keras.saving import register_keras_serializable
-from transformer import Transformer
-from packaging import version
 
-# -----------------------------
-# Basic env / version sanity
-# -----------------------------
-MIN_TF = "2.15.0"  # adjust if you truly require newer
-assert version.parse(tf.__version__) >= version.parse(MIN_TF), (
-    f"Requires TensorFlow >= {MIN_TF}, found {tf.__version__}"
-)
+from transformer import Transformer  # your architecture
 
-# -----------------------------
-# Google Drive file IDs
-# -----------------------------
-WEIGHTS_FILE_ID = "1r5_qQhb975vaO6XXV_SyI8ytzE3obV9u"
-SOURCE_VEC_ID   = "10NfA0tF9zs2CHYSNAHmQ_nRU9LDwjv50"
-TARGET_VEC_ID   = "1gXNAutl1HtPhMpNtmQ78JscLSkR2_Qid"
+# --- GitHub Release assets and SHA-256 hashes ---
+ASSETS = {
+    "source_vectorizer.keras": (
+        "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/source_vectorizer.keras",
+        "9260d7d760f115793408b0694afb36daa6646169cd840ee41352f9327d62b906",
+    ),
+    "target_vectorizer.keras": (
+        "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/target_vectorizer.keras",
+        "47b0dc1848f2ca6963f5def3bfa705b0a39d4ee08aac6d0b4b755e61cd010d97",
+    ),
+    "translation_transformer.weights.h5": (
+        "https://github.com/shanalishah/english-to-spanish-translator/releases/download/v1.0/translation_transformer.weights.h5",
+        "9f0c1eea7407c3274c371850c3e72df87b3b51194f99d82e409779bcc2a25382",
+    ),
+}
 
-# -----------------------------
-# Keras-serializable standardization (for loading vectorizers)
-# -----------------------------
-@register_keras_serializable()
-def custom_standardization(input_string):
-    strip_chars = string.punctuation + "¿"
-    strip_chars = strip_chars.replace("[", "").replace("]", "")
-    lower = tf.strings.lower(input_string)
-    return tf.strings.regex_replace(lower, f"[{re.escape(strip_chars)}]", "")
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-# -----------------------------
-# Cache resources across reruns
-# -----------------------------
-@st.cache_resource(show_spinner=False)
+def download_with_verify(url, dest: Path, expected_hash: str):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and sha256_of(dest).lower() == expected_hash.lower():
+        return
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    r = requests.get(url, stream=True)
+    r.raise_for_status()
+    with open(tmp, "wb") as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+    if sha256_of(tmp).lower() != expected_hash.lower():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"Checksum mismatch for {dest.name}")
+    tmp.replace(dest)
+
+@st.cache_resource
 def load_resources():
-    files = {
-        "translation_transformer.weights.h5": WEIGHTS_FILE_ID,
-        "source_vectorizer.keras": SOURCE_VEC_ID,
-        "target_vectorizer.keras": TARGET_VEC_ID,
-    }
+    for fname, (url, sha256) in ASSETS.items():
+        download_with_verify(url, Path(fname), sha256)
 
-    for fname, fid in files.items():
-        if not os.path.exists(fname):
-            url = f"https://drive.google.com/uc?id={fid}"
-            gdown.download(url, fname, quiet=False)
+    src_vec = load_model("source_vectorizer.keras")
+    tgt_vec = load_model("target_vectorizer.keras")
 
-    # Load vectorizers (saved with Keras)
-    source_vectorization = load_model("source_vectorizer.keras")
-    target_vectorization = load_model("target_vectorizer.keras")
-
-    # Rebuild the Transformer and load weights
     vocab_size = 15000
     model = Transformer(
-        n_layers=4,
-        d_emb=128,
-        n_heads=8,
-        d_ff=512,
-        dropout_rate=0.1,
-        src_vocab_size=vocab_size,
-        tgt_vocab_size=vocab_size,
+        n_layers=4, d_emb=128, n_heads=8, d_ff=512,
+        dropout_rate=0.1, src_vocab_size=vocab_size,
+        tgt_vocab_size=vocab_size
     )
 
-    # Build model with real shapes before loading weights
-    src_example = source_vectorization(["hello"])
-    tgt_example = target_vectorization(["[start] hello [end]"])[:, :-1]
-    _ = model((src_example, tgt_example))
+    example = "hello"
+    src = src_vec([example])
+    tgt = tgt_vec(["[start] hello [end]"])[:, :-1]
+    model((src, tgt))
     model.load_weights("translation_transformer.weights.h5")
 
-    # Prepare decoding vocab
-    spa_vocab = target_vectorization.get_vocabulary()
-    spa_index_lookup = dict(zip(range(len(spa_vocab)), spa_vocab))
+    spa_vocab = tgt_vec.get_vocabulary()
+    lookup = {i: token for i, token in enumerate(spa_vocab)}
 
-    return source_vectorization, target_vectorization, model, spa_index_lookup
+    return src_vec, tgt_vec, model, lookup
 
-# -----------------------------
-# Greedy decoding
-# -----------------------------
-def translate(input_sentence, source_vectorization, target_vectorization, model, spa_index_lookup, max_len=20):
-    text = (input_sentence or "").strip()
+def translate(text, src_vec, tgt_vec, model, lookup, max_len=20):
     if not text:
         return ""
-
-    tokenized_src = source_vectorization([text])
+    tokenized = src_vec([text])
     decoded = "[start]"
     for _ in range(max_len):
-        tokenized_tgt = target_vectorization([decoded])[:, :-1]
-        preds = model((tokenized_src, tokenized_tgt))
-        # SAFER: always pick the last timestep
-        next_token_id = int(np.argmax(preds[0, -1, :]))
-        next_token = spa_index_lookup.get(next_token_id, "")
-        decoded += " " + next_token
-        if next_token == "[end]":
+        tokenized_tgt = tgt_vec([decoded])[:, :-1]
+        preds = model((tokenized, tokenized_tgt))
+        next_id = int(np.argmax(preds[0, -1, :]))
+        token = lookup.get(next_id, "")
+        decoded += " " + token
+        if token == "[end]":
             break
-
     return decoded.replace("[start] ", "").replace(" [end]", "").strip()
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
+# --- Streamlit Interface ---
 st.set_page_config(page_title="English → Spanish Translator", layout="centered")
-st.title("English → Spanish Translator 🌍")
-st.caption("Transformer (TensorFlow + Keras). Enter English text and get a Spanish translation.")
+st.title("English → Spanish Translator")
+st.caption("Powered by a Transformer model (TensorFlow/Keras)")
 
-user_input = st.text_input("Your English sentence:", placeholder="e.g., The weather is nice today.")
-
+user_input = st.text_input("English sentence:", placeholder="Type here...")
 if user_input:
-    with st.spinner("Translating…"):
+    with st.spinner("Translating..."):
         src_vec, tgt_vec, model, lookup = load_resources()
-        out = translate(user_input, src_vec, tgt_vec, model, lookup)
-    st.success(f"**Spanish:** {out}")
+        result = translate(user_input, src_vec, tgt_vec, model, lookup)
+        st.success(f"**Spanish:** {result}")
