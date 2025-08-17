@@ -19,7 +19,7 @@ from transformer import Transformer
 # Config
 # -----------------------------
 st.set_page_config(page_title="English -> Spanish Translator", layout="centered")
-st.title("English -> Spanish Translator 🌍")
+st.title("English -> Spanish Translator 🌍 Harrison")
 st.caption("Enter English text and get a Spanish translation.")
 
 # GitHub Release asset URLs
