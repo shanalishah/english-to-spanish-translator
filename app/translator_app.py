@@ -18,8 +18,8 @@ from transformer import Transformer
 # -----------------------------
 # Config
 # -----------------------------
-st.set_page_config(page_title="English -> Spanish Translator Awais Hafeez", layout="centered")
-st.title("English -> Spanish Translator 🌍")
+st.set_page_config(page_title="English -> Spanish Translator", layout="centered")
+st.title("English -> Spanish Translator 🌍 Awais Hafeez")
 st.caption("Enter English text and get a Spanish translation.")
 
 # GitHub Release asset URLs
